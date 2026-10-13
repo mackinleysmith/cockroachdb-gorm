@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const (
@@ -13,64 +14,60 @@ const (
 	timeLayout        = "2006-01-02 15:04:05.000000"
 )
 
-type asOfSystemTimeModifier struct {
+// AsOfSystemTimeClause configures a query to read at a past system time. Pass it
+// to db.Clauses; the CockroachDB FROM clause builder appends it after any joins.
+// On a non-CockroachDB connection it has no effect.
+type AsOfSystemTimeClause struct {
 	expression string
 	err        error
 }
 
-// ModifyStatement stores the computed AS OF SYSTEM TIME expression on the
-// statement so that the custom FROM clause builder can append it to the final
-// SQL.
-func (m asOfSystemTimeModifier) ModifyStatement(stmt *gorm.Statement) {
-	if m.err != nil {
+var (
+	_ gorm.StatementModifier = AsOfSystemTimeClause{}
+	_ clause.Expression      = AsOfSystemTimeClause{}
+)
+
+// ModifyStatement stores the AS OF SYSTEM TIME expression on the statement. It
+// lives in the statement settings, so it is cloned along with the statement and
+// survives rebuilding the same statement (e.g. Count followed by Find).
+func (c AsOfSystemTimeClause) ModifyStatement(stmt *gorm.Statement) {
+	if c.err != nil {
 		if stmt.DB != nil {
-			stmt.AddError(m.err)
+			stmt.AddError(c.err)
 		}
 		return
 	}
-	stmt.Settings.Store(asOfSystemTimeKey, m.expression)
+	stmt.Settings.Store(asOfSystemTimeKey, c.expression)
 }
 
-// AsOfSystemTime returns a statement modifier that configures the query to use
-// CockroachDB's AS OF SYSTEM TIME clause. The input can be either a raw string
-// expression (e.g. "'-1h'" or "now() - interval '1 day'") or a time.Time value.
-func AsOfSystemTime(timestamp interface{}) gorm.StatementModifier {
-	return buildAsOfSystemTimeModifier(timestamp)
-}
+// Build satisfies clause.Expression so the value can be passed to db.Clauses.
+// Rendering happens in the FROM clause builder, never here.
+func (AsOfSystemTimeClause) Build(clause.Builder) {}
 
-// AsOfSystemTimeNow configures the statement to read data as close to the
-// current time as CockroachDB permits without incurring retry errors.
-func AsOfSystemTimeNow() gorm.StatementModifier {
-	return buildAsOfSystemTimeModifier("'-1µs'")
-}
-
-// AsOfSystemTime exposes the same helper on the dialector so callers can write
-// db.Dialector.(interface{ AsOfSystemTime(any) gorm.StatementModifier }).
-func (dialector Dialector) AsOfSystemTime(timestamp interface{}) gorm.StatementModifier {
-	return buildAsOfSystemTimeModifier(timestamp)
-}
-
-// AsOfSystemTimeNow exposes the now helper on the dialector.
-func (dialector Dialector) AsOfSystemTimeNow() gorm.StatementModifier {
-	return buildAsOfSystemTimeModifier("'-1µs'")
-}
-
-func buildAsOfSystemTimeModifier(timestamp interface{}) asOfSystemTimeModifier {
+// AsOfSystemTime reads data as of the given time. The input can be either a raw
+// string expression (e.g. "'-1h'" or "now() - interval '1 day'") or a time.Time.
+//
+//	db.Clauses(cockroachdb.AsOfSystemTime("'-1h'")).Find(&users)
+func AsOfSystemTime(timestamp any) AsOfSystemTimeClause {
 	switch v := timestamp.(type) {
 	case string:
-		return asOfSystemTimeModifier{expression: sanitizeRawTimestamp(v)}
-	case fmt.Stringer:
-		return asOfSystemTimeModifier{expression: sanitizeRawTimestamp(v.String())}
+		return AsOfSystemTimeClause{expression: sanitizeRawTimestamp(v)}
 	case time.Time:
-		return asOfSystemTimeModifier{expression: fmt.Sprintf("'%s'", v.Format(timeLayout))}
+		return AsOfSystemTimeClause{expression: fmt.Sprintf("'%s'", v.Format(timeLayout))}
 	case *time.Time:
 		if v == nil {
-			return asOfSystemTimeModifier{err: fmt.Errorf("cockroachdb: nil *time.Time provided to AsOfSystemTime")}
+			return AsOfSystemTimeClause{err: fmt.Errorf("cockroachdb: nil *time.Time provided to AsOfSystemTime")}
 		}
-		return asOfSystemTimeModifier{expression: fmt.Sprintf("'%s'", v.Format(timeLayout))}
+		return AsOfSystemTimeClause{expression: fmt.Sprintf("'%s'", v.Format(timeLayout))}
 	default:
-		return asOfSystemTimeModifier{err: fmt.Errorf("cockroachdb: unsupported timestamp type %T for AS OF SYSTEM TIME", timestamp)}
+		return AsOfSystemTimeClause{err: fmt.Errorf("cockroachdb: unsupported timestamp type %T for AS OF SYSTEM TIME", timestamp)}
 	}
+}
+
+// AsOfSystemTimeNow reads data as close to the current time as CockroachDB
+// permits without incurring retry errors.
+func AsOfSystemTimeNow() AsOfSystemTimeClause {
+	return AsOfSystemTime("'-1µs'")
 }
 
 func sanitizeRawTimestamp(raw string) string {

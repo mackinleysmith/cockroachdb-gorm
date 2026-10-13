@@ -12,6 +12,10 @@ type Config = postgres.Config
 
 // Dialector implements gorm.Dialector for CockroachDB by wrapping the existing
 // PostgreSQL dialector and extending it with Cockroach-specific behaviour.
+//
+// Name() is inherited and stays "postgres": CockroachDB speaks the PostgreSQL
+// dialect, and libraries such as gorm.io/datatypes pick column types and SQL by
+// matching on that name.
 type Dialector struct {
 	*postgres.Dialector
 }
@@ -30,11 +34,6 @@ func New(config Config) gorm.Dialector {
 		return &Dialector{Dialector: pgDialector}
 	}
 	return &Dialector{Dialector: &postgres.Dialector{Config: &config}}
-}
-
-// Name returns the dialect name used by GORM.
-func (dialector Dialector) Name() string {
-	return "cockroachdb"
 }
 
 // Initialize wires the wrapped PostgreSQL dialector and registers the
@@ -59,24 +58,17 @@ func (dialector Dialector) clauseBuilders() map[string]clause.ClauseBuilder {
 	}
 }
 
-// fromClauseBuilder renders the FROM clause and appends the AS OF SYSTEM TIME
-// modifier if one has been configured via the CockroachDB helpers.
+// fromClauseBuilder renders the FROM clause as usual, then appends AS OF SYSTEM
+// TIME if the statement carries one, so it lands after any joins.
 func fromClauseBuilder(c clause.Clause, builder clause.Builder) {
-	if from, ok := c.Expression.(clause.From); ok {
-		from.Build(builder)
+	c.Build(builder)
 
-		if stmt, ok := builder.(*gorm.Statement); ok {
-			if raw, ok := stmt.Settings.Load(asOfSystemTimeKey); ok {
-				if asOf, ok := raw.(string); ok && asOf != "" {
-					builder.WriteByte(' ')
-					builder.WriteString("AS OF SYSTEM TIME ")
-					builder.WriteString(asOf)
-				}
-				stmt.Settings.Delete(asOfSystemTimeKey)
-			}
-		}
+	stmt, ok := builder.(*gorm.Statement)
+	if !ok {
 		return
 	}
-
-	c.Build(builder)
+	if asOf, ok := stmt.Settings.Load(asOfSystemTimeKey); ok {
+		builder.WriteString(" AS OF SYSTEM TIME ")
+		builder.WriteString(asOf.(string))
+	}
 }

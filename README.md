@@ -41,16 +41,12 @@ db.Clauses(cockroachdb.AsOfSystemTime(time.Date(2023, 1, 1, 12, 0, 0, 0, time.UT
 db.Clauses(cockroachdb.AsOfSystemTimeNow()).Find(&users)
 ```
 
-For more fluent chaining, you can also access the helpers directly from the
-dialector:
+On a connection opened with `gorm.io/driver/postgres`, these clauses have no
+effect, so code shared between CockroachDB and PostgreSQL can apply them
+unconditionally.
 
-```go
-asOf := db.Dialector.(interface {
-	AsOfSystemTime(any) gorm.StatementModifier
-}).AsOfSystemTime("'-30m'")
-
-db.Clauses(asOf).Where("status = ?", "active").Find(&users)
-```
+The dialector keeps GORM's `postgres` dialect name, because libraries such as
+`gorm.io/datatypes` choose column types and SQL by matching on that name.
 
 These helpers sanitize raw string input by removing semicolons and format
 `time.Time` values with microsecond precision to match CockroachDB's SQL
