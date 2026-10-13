@@ -120,3 +120,19 @@ func TestNameStaysPostgres(t *testing.T) {
 		t.Fatalf("want postgres, got %s", got)
 	}
 }
+
+// Preloads copy the parent's settings into a fresh statement (see gorm's
+// callbacks/preload.go); they must not inherit AS OF SYSTEM TIME.
+func TestAsOfSystemTimeNotCopiedToPreloads(t *testing.T) {
+	db := dryRunDB(t, Open(dsn))
+	q := db.Model(&user{}).Clauses(AsOfSystemTimeNow())
+
+	preload := q.Session(&gorm.Session{NewDB: true})
+	q.Statement.Settings.Range(func(k, v any) bool {
+		preload.Statement.Settings.Store(k, v)
+		return true
+	})
+	if sql := preload.Find(&[]company{}).Statement.SQL.String(); strings.Contains(sql, "AS OF SYSTEM TIME") {
+		t.Fatalf("preload inherited AS OF SYSTEM TIME: %s", sql)
+	}
+}

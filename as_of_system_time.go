@@ -27,9 +27,11 @@ var (
 	_ clause.Expression      = AsOfSystemTimeClause{}
 )
 
-// ModifyStatement stores the AS OF SYSTEM TIME expression on the statement. It
-// lives in the statement settings, so it is cloned along with the statement and
-// survives rebuilding the same statement (e.g. Count followed by Find).
+// ModifyStatement attaches the clause to the statement. It is kept among the
+// statement's clauses rather than its settings: clauses are cloned with the
+// statement and survive rebuilding it (e.g. Count followed by Find), but unlike
+// settings they are not copied into preload or association queries, which run
+// at the current time.
 func (c AsOfSystemTimeClause) ModifyStatement(stmt *gorm.Statement) {
 	if c.err != nil {
 		if stmt.DB != nil {
@@ -37,7 +39,7 @@ func (c AsOfSystemTimeClause) ModifyStatement(stmt *gorm.Statement) {
 		}
 		return
 	}
-	stmt.Settings.Store(asOfSystemTimeKey, c.expression)
+	stmt.Clauses[asOfSystemTimeKey] = clause.Clause{Name: asOfSystemTimeKey, Expression: c}
 }
 
 // Build satisfies clause.Expression so the value can be passed to db.Clauses.

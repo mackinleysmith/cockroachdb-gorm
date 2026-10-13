@@ -67,8 +67,8 @@ func fromClauseBuilder(c clause.Clause, builder clause.Builder) {
 	if !ok {
 		return
 	}
-	if asOf, ok := stmt.Settings.Load(asOfSystemTimeKey); ok {
+	if asOf, ok := stmt.Clauses[asOfSystemTimeKey].Expression.(AsOfSystemTimeClause); ok {
 		builder.WriteString(" AS OF SYSTEM TIME ")
-		builder.WriteString(asOf.(string))
+		builder.WriteString(asOf.expression)
 	}
 }
