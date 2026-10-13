@@ -13,6 +13,12 @@ type user struct {
 	ID        uint
 	Name      string
 	CompanyID uint
+	Orders    []order
+}
+
+type order struct {
+	ID     uint
+	UserID uint
 }
 
 type company struct {
@@ -121,18 +127,38 @@ func TestNameStaysPostgres(t *testing.T) {
 	}
 }
 
-// Preloads copy the parent's settings into a fresh statement (see gorm's
-// callbacks/preload.go); they must not inherit AS OF SYSTEM TIME.
-func TestAsOfSystemTimeNotCopiedToPreloads(t *testing.T) {
+// preloadSQL runs a dry-run Find with a preload over already-populated users and
+// returns the SQL of the preload query.
+func preloadSQL(t *testing.T, conds ...any) string {
+	t.Helper()
 	db := dryRunDB(t, Open(dsn))
-	q := db.Model(&user{}).Clauses(AsOfSystemTimeNow())
+	var sqls []string
+	if err := db.Callback().Query().After("gorm:query").Register("test:capture", func(tx *gorm.DB) {
+		sqls = append(sqls, tx.Statement.SQL.String())
+	}); err != nil {
+		t.Fatal(err)
+	}
 
-	preload := q.Session(&gorm.Session{NewDB: true})
-	q.Statement.Settings.Range(func(k, v any) bool {
-		preload.Statement.Settings.Store(k, v)
-		return true
-	})
-	if sql := preload.Find(&[]company{}).Statement.SQL.String(); strings.Contains(sql, "AS OF SYSTEM TIME") {
+	users := []user{{ID: 1}}
+	db.Clauses(AsOfSystemTimeNow()).Preload("Orders", conds...).Find(&users)
+	for _, sql := range sqls {
+		if strings.Contains(sql, `FROM "orders"`) {
+			return sql
+		}
+	}
+	t.Fatalf("no preload query captured: %q", sqls)
+	return ""
+}
+
+func TestPreloadDoesNotInheritAsOfSystemTime(t *testing.T) {
+	if sql := preloadSQL(t); strings.Contains(sql, "AS OF SYSTEM TIME") {
 		t.Fatalf("preload inherited AS OF SYSTEM TIME: %s", sql)
+	}
+}
+
+func TestScopeOptsPreloadIntoAsOfSystemTime(t *testing.T) {
+	sql := preloadSQL(t, AsOfSystemTime("'-5s'").Scope)
+	if want := `SELECT * FROM "orders" AS OF SYSTEM TIME '-5s' WHERE "orders"."user_id" = $1`; sql != want {
+		t.Fatalf("\nwant %s\n got %s", want, sql)
 	}
 }

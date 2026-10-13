@@ -41,6 +41,16 @@ db.Clauses(cockroachdb.AsOfSystemTime(time.Date(2023, 1, 1, 12, 0, 0, 0, time.UT
 db.Clauses(cockroachdb.AsOfSystemTimeNow()).Find(&users)
 ```
 
+Preload queries do not inherit `AS OF SYSTEM TIME` from their parent, so
+preloaded rows are read at the current time. To opt a preload in, pass the
+clause's `Scope` as a preload condition:
+
+```go
+db.Clauses(cockroachdb.AsOfSystemTimeNow()).
+	Preload("Orders", cockroachdb.AsOfSystemTimeNow().Scope).
+	Find(&users)
+```
+
 On a connection opened with `gorm.io/driver/postgres`, these clauses have no
 effect, so code shared between CockroachDB and PostgreSQL can apply them
 unconditionally.

@@ -46,6 +46,14 @@ func (c AsOfSystemTimeClause) ModifyStatement(stmt *gorm.Statement) {
 // Rendering happens in the FROM clause builder, never here.
 func (AsOfSystemTimeClause) Build(clause.Builder) {}
 
+// Scope applies the clause as a GORM scope. Preload queries do not inherit AS OF
+// SYSTEM TIME from their parent; pass Scope as a Preload condition to opt in:
+//
+//	db.Clauses(cockroachdb.AsOfSystemTimeNow()).
+//		Preload("Orders", cockroachdb.AsOfSystemTimeNow().Scope).
+//		Find(&users)
+func (c AsOfSystemTimeClause) Scope(tx *gorm.DB) *gorm.DB { return tx.Clauses(c) }
+
 // AsOfSystemTime reads data as of the given time. The input can be either a raw
 // string expression (e.g. "'-1h'" or "now() - interval '1 day'") or a time.Time.
 //
